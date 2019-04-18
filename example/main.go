@@ -18,7 +18,7 @@ spec:
   backoffLimit: 4`
 
 func main() {
-	if err := kjClient.DummyClinet(manifest); err != nil {
+	if err := kjClient.Involk(manifest); err != nil {
 		panic(err)
 	}
 }
