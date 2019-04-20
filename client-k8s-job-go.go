@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"golang.org/x/sync/errgroup"
+
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -16,7 +18,11 @@ func Dummy() {
 	fmt.Println("hello")
 }
 
-func Involk(manifests ...string) error {
+type KjcResult struct {
+	AppliedJob *batchv1.Job
+}
+
+func Involk(manifests ...string) ([]KjcResult, error) {
 	var kubeconfig *string
 	if home := homedir.HomeDir(); home != "" {
 		kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
@@ -26,48 +32,43 @@ func Involk(manifests ...string) error {
 	flag.Parse()
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
-		return err
+		return []KjcResult{}, err
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return err
+		return []KjcResult{}, err
 	}
 
-	_ = clientset
-
+	var results = make([]KjcResult, 0, len(manifests))
+	var eg errgroup.Group
 	for _, manifest := range manifests {
-		decode := scheme.Codecs.UniversalDeserializer().Decode
-		obj, _, err := decode([]byte(manifest), nil, nil)
-		if err != nil {
-			return err
-		}
-		switch o := obj.(type) {
-		case *batchv1.Job:
-			fmt.Println(o)
-		default:
-			return err
-		}
+		eg.Go(func() error {
+			decode := scheme.Codecs.UniversalDeserializer().Decode
+			object, _, err := decode([]byte(manifest), nil, nil)
+			if err != nil {
+				return err
+			}
+			switch obj := object.(type) {
+			case *batchv1.Job:
+				if obj.GetNamespace() == "" {
+					obj.ObjectMeta.Namespace = "default"
+				}
+				var result KjcResult
+				jobsClient := clientset.BatchV1().Jobs(obj.GetNamespace())
+				result.AppliedJob, err = jobsClient.Create(obj)
+				if err != nil {
+					return err
+				}
+				results = append(results, result)
+				return nil
+			default:
+				return err
+			}
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return []KjcResult{}, err
 	}
 
-	/*
-		jobsClient := clientset.BatchV1().Jobs("default")
-		job := &batchv1.Job{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "demo-job",
-				Namespace: "gitlab",
-			},
-			Spec: batchv1.JobSpec{
-				Template: apiv1.PodTemplateSpec{
-					Spec: apiv1.PodSpec{
-						Containers: []apiv1.Container{
-							{
-								Name:  "demo",
-								Image: "myimage",
-							},
-						},
-					},
-				},
-			},
-		}*/
-	return nil
+	return results, nil
 }

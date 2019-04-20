@@ -1,6 +1,10 @@
 package main
 
-import kjClient "github.com/nnao45/client-k8s-job-go"
+import (
+	"fmt"
+
+	kjClient "github.com/nnao45/client-k8s-job-go"
+)
 
 const manifest = `
 apiVersion: batch/v1
@@ -18,7 +22,11 @@ spec:
   backoffLimit: 4`
 
 func main() {
-	if err := kjClient.Involk(manifest); err != nil {
+	results, err := kjClient.Involk(manifest)
+	if err != nil {
 		panic(err)
+	}
+	for _, result := range results {
+		fmt.Println(result)
 	}
 }
