@@ -7,7 +7,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	kjConfig "github.com/nnao45/client-k8s-job-go/config"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -51,7 +54,39 @@ func Involk(manifests ...string) ([]KjcResult, error) {
 			switch obj := object.(type) {
 			case *batchv1.Job:
 				if obj.GetNamespace() == "" {
-					obj.ObjectMeta.Namespace = "default"
+					obj.ObjectMeta.Namespace = kjConfig.DefaultNamespace
+				}
+				var objSpec = &obj.Spec
+				if objSpec.Completions == nil {
+					v := kjConfig.DefaultJobCompletions
+					objSpec.Completions = &v
+				}
+				if objSpec.Parallelism == nil {
+					v := kjConfig.DefaultJobParallelism
+					objSpec.Parallelism = &v
+				}
+				if objSpec.BackoffLimit == nil {
+					v := kjConfig.DefaultJobBackofflimit
+					objSpec.BackoffLimit = &v
+				}
+				for i := range objSpec.Template.Spec.Containers {
+					containerRef := &obj.Spec.Template.Spec.Containers[i]
+					if containerRef.Resources.Limits == nil {
+						containerRef.Resources.Limits = corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse(kjConfig.DefaultJobResoucesLimitCPU),
+						}
+					}
+					if containerRef.Resources.Requests == nil {
+						containerRef.Resources.Requests = corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse(kjConfig.DefaultJobResoucesLimitMemory),
+						}
+					}
+					if _, ok := containerRef.Resources.Limits[corev1.ResourceCPU]; !ok {
+						containerRef.Resources.Limits[corev1.ResourceCPU] = resource.MustParse(kjConfig.DefaultJobResoucesLimitCPU)
+					}
+					if _, ok := containerRef.Resources.Requests[corev1.ResourceCPU]; !ok {
+						containerRef.Resources.Requests[corev1.ResourceCPU] = resource.MustParse(kjConfig.DefaultJobResoucesLimitMemory)
+					}
 				}
 				var result KjcResult
 				jobsClient := clientset.BatchV1().Jobs(obj.GetNamespace())
